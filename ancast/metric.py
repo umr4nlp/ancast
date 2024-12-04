@@ -1,7 +1,11 @@
-from param_fun import *                
+#! /usr/bin/python3
+# -*- coding: utf-8 -*-
+"""Metric representation"""
+
+from ancast.ops import protected_divide
 
 class Metric:
-    
+
     def __init__(self, name):
         self.name = name
         self.metrics = {
@@ -23,40 +27,40 @@ class Metric:
             },
             "ulr":{
                 "score": 0,
-                "score_count": 0                
+                "score_count": 0
             },
             "wlr":{
                 "score": 0,
-                "score_count": 0                
+                "score_count": 0
             },
             "modal":{
                 "score": 0,
-                "score_count": 0                
+                "score_count": 0
             },
             "temporal":{
                 "score": 0,
-                "score_count": 0                
+                "score_count": 0
             },
             "coref":{
                 "score": 0,
-                "score_count": 0                
+                "score_count": 0
             }
-        }   
-        
+        }
+
     def log_and_inc_metric(self, Mt):
         for key1 in self.metrics:
             for key2 in self.metrics[key1]:
                 self.metrics[key1][key2] += Mt.metrics[key1][key2]
-        
+
     def log_and_inc(self, key1, key2, value, weight=1):
         assert key1 in self.metrics
         assert key2 in self.metrics[key1]
         self.metrics[key1][key2] += value
         self.metrics[key1][key2+"_count"] += weight
-    
+
     def assign(self, key1, key2, value):
         self.metrics[key1][key2] = value
-        
+
     def compute(self, type):
         if type == "smatch":
             return protected_divide(self.metrics["concept"]["smatch_concept_sum"] + self.metrics["relation"]["matched"] , self.metrics["concept"]["smatch_concept_sum_count"] + self.metrics["relation"]["total"])
@@ -94,5 +98,3 @@ class Metric:
             return protected_divide(self.metrics["lr"]["score"] + self.metrics["modal"]["score"] + self.metrics["temporal"]["score"] + self.metrics["coref"]["score"], self.metrics["lr"]["score_count"]  + self.metrics["modal"]["score_count"] + self.metrics["temporal"]["score_count"] + self.metrics["coref"]["score_count"])
         else:
             return None
-         
-           
