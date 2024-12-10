@@ -1,5 +1,7 @@
-from collections import defaultdict
-from param_fun import *
+#! /usr/bin/python3
+# -*- coding: utf-8 -*-
+"""Node representation"""
+
 
 class Attribute(object):
 
@@ -23,7 +25,7 @@ class Attribute(object):
         if self.quoted:
             return f'"{self.name}"'
         else:
-            return self.name 
+            return self.name
 
 # ------------ constant --------------
 
