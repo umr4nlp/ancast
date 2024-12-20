@@ -9,6 +9,7 @@ from collections import defaultdict
 
 from ancast.node import Attribute
 from ancast.resource_utils import REIFY_RELS
+from ancast.params import HANDLE_QUOTED_REENTRANCY
 from ancast.word import Word
 
 logger = logging.getLogger(__name__)
@@ -242,9 +243,9 @@ class Sentence:
                         end = text.find('"', i+1)
                         text_part = text[i+1:end]
 
-                        # this is an ill-formed scene where variables are quoted
+                        # this is an ill-formed scene where variables are quoted in some parsers
 
-                        if text_part in var2node.keys():
+                        if HANDLE_QUOTED_REENTRANCY and (text_part in var2node.keys()):
                             sub_node = var2node[text_part]
                             print(f"Quoted reentrancy handled in sentence {self.sent_num}")
                         else:
