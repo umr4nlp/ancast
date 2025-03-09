@@ -69,40 +69,41 @@ def main():
     # hyperparams
     parser.add_argument(
         '-c', '--cneighbor', type=int,
-        default=params.CNEIGHBOR,
+        default=params.CNEIGHBOR, help="coefficient for the importance of neighborhood information when broadcasting"
     )
     parser.add_argument(
         '-sc', '--sense-coefficient', type=float,
-        default=params.SENSE_COEFFICIENT,
+        default=params.SENSE_COEFFICIENT, help="importance of sense ID when comparing two concepts"
     )
     parser.add_argument(
         '--separate-1-and-2', type=str2bool, nargs='?', const=True,
-        default=params.SEPARATE_1_AND_2,
+        default=params.SEPARATE_1_AND_2, help="whether to combine one-hop and two-hop neighbors together"
     )
     parser.add_argument(
         '--allow-reify', type=str2bool, nargs='?', const=True,
-        default=params.ALLOW_REIFY,
+        default=params.ALLOW_REIFY, help="whether to apply reification before comparing graphs"
     )
     parser.add_argument(
         '--use-alignment', type=str2bool, nargs='?', const=True,
-        default=params.USE_ALIGNMENT,
+        default=params.USE_ALIGNMENT, help="whether to use alignment information when establishing anchors"
     )
     parser.add_argument(
         '--use-smatch-top', type=str2bool, nargs='?', const=True,
-        default=params.USE_SMATCH_TOP,
+        default=params.USE_SMATCH_TOP, help="whether to add (TOP :root `ROOT_NODE`) edge"
     )
+    # noinspection PyTypeChecker
     ### doc-level eval specific
     parser.add_argument(
-        '--weighted', action='store_true',
-        help="whether to apply weighted average for ancast++ doc-level evaluation"
+        '--weighted', type=str.lower, choices=["snts", "toks"],
+        help="whether to apply weighted average for ancast++ doc-level evaluation by (1) number of sentences or (2) number of tokens"
     )
 
     # experiment
     parser.add_argument(
-        '--seed', type=int, default=13681,
+        '--seed', type=int, default=13681, help="random seed for reproducibility"
     )
     parser.add_argument(
-        '--debug', action='store_true',
+        '--debug', action='store_true', help="debug logging mode"
     )
 
     args = parser.parse_args()
@@ -116,13 +117,13 @@ def main():
 
     ### inner
     return evaluate(
-        scope=args.scope,
         pred_fpaths=args.pred,
         gold_fpaths=args.gold,
         output_fpath=args.output,
         pred_exts=args.pred_ext,
         gold_exts=args.gold_ext,
         data_format=args.data_format,
+        scope=args.scope,
         Cneighbor=args.cneighbor,
         sense_coefficient=args.sense_coefficient,
         separate_1_and_2=args.separate_1_and_2,

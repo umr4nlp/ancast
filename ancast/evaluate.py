@@ -3,7 +3,7 @@
 
 import logging
 import os
-from typing import List
+from typing import Dict, List, Union
 
 import numpy as np
 
@@ -43,6 +43,11 @@ def collect_fpaths(
         pred_exts=None,
         gold_exts=None,
 ) -> List[List]:
+    if isinstance(pred_fpaths, str):
+        pred_fpaths = [pred_fpaths]
+    if isinstance(gold_fpaths, str):
+        gold_fpaths = [gold_fpaths]
+
     # sentinel
     assert all(os.path.exists(x) for x in pred_fpaths)
     assert all(os.path.exists(x) for x in gold_fpaths)
@@ -106,8 +111,8 @@ def collect_fpaths(
     return pg_fpaths
 
 def evaluate_snt(
-        pred_fpaths,
-        gold_fpaths,
+        pred_fpaths: Union[str, List[str]],
+        gold_fpaths: Union[str, List[str]],
         data_format: str,
         output_fpath=None,
         pred_exts=None,
@@ -119,7 +124,7 @@ def evaluate_snt(
         use_alignment: bool = params.USE_ALIGNMENT,
         use_smatch_top: bool = params.USE_SMATCH_TOP,
         **unused
-):
+) -> List[float]:
     # sentinel
     data_format = data_format.lower()
     assert data_format in ['amr', 'umr']
@@ -138,6 +143,7 @@ def evaluate_snt(
         load_abt_vocab(global_cache=True)
         load_reify_rels(global_cache=True)
 
+    sent_scores = []
     for eval_tuple in eval_tuples:
         DM = SentenceMatch(
             format=data_format,
@@ -151,9 +157,13 @@ def evaluate_snt(
         output_csv = eval_tuple[1] if len(eval_tuple) > 1 else None
         DM.read_document(eval_tuple[0], output_csv=output_csv)
 
+        sent_scores.append(DM.sent_fscore)
+
+    return sent_scores
+
 def evaluate_doc(
-        pred_fpaths,
-        gold_fpaths,
+        pred_fpaths: Union[str, List[str]],
+        gold_fpaths: Union[str, List[str]],
         output_fpath=None,
         pred_exts=None,
         gold_exts=None,
@@ -163,9 +173,9 @@ def evaluate_doc(
         allow_reify: bool = params.ALLOW_REIFY,
         use_alignment: bool = params.USE_ALIGNMENT,
         use_smatch_top: bool = params.USE_SMATCH_TOP,
-        weighted_average=False,
+        weighted=None,
         **unused
-):
+) -> Dict[str, Union[float, list[float]]]:
     eval_tuples = collect_fpaths(
         pred_fpaths=pred_fpaths,
         pred_exts=pred_exts,
@@ -189,7 +199,8 @@ def evaluate_doc(
         'comp': []
     }
 
-    valid_doc_nums = []
+    num_snts_by_docs = []
+    num_toks_by_docs = []
     for eval_tuple in eval_tuples:
         DM = DocumentMatch(
             Cneighbor=Cneighbor,
@@ -201,23 +212,37 @@ def evaluate_doc(
         )
         DM.read_document(eval_tuple[0], output_csv=eval_tuple[1])
 
-        if aggregate_flag:
-            for k,v in aggregate.items():
-                v.append(getattr(DM, f'{k}_fscore'))
-            valid_doc_nums.append(DM.doc_num_valid)
+        for k,v in aggregate.items():
+            v.append(getattr(DM, f'{k}_fscore'))
+
+        num_snts_by_docs.append(DM.doc_num_snts)
+        num_toks_by_docs.append(DM.doc_num_toks)
 
     if aggregate_flag:
         logger.info("=== Aggregate Statistics ===")
+
+        apply_weighted_average = weighted is not None
         for k,v in aggregate.items():
-            cur_aggr = np.average(v, weights=valid_doc_nums if weighted_average else None)
-            logger.info(f"{'Weighted ' if weighted_average else ''}Aggregate {k.capitalize()} Score:\t{cur_aggr:.2%}")
+            weights = None
+            if apply_weighted_average:
+                weights = num_snts_by_docs if weighted == 'snts' else num_toks_by_docs
+
+            aggregate[k] = cur_aggr = np.average(v, weights=weights)
+
+            logger.info(f"{'Weighted ' if weighted else ''}Aggregate {k.capitalize()} Score:\t{cur_aggr:.2%}")
+
+    elif len(eval_tuples) == 1:
+        for k, v in aggregate.items():
+            aggregate[k] = v[0]
+
+    return aggregate
 
 # @timer_decorator
-def evaluate(scope: str, *args, **kwargs):
+def evaluate(*args, scope: str = "doc", **kwargs):
     # sentinel
     scope = scope.lower()
     assert scope in ['snt', 'doc'], \
         f'either `snt` or `doc` scope expected but received `{scope}`'
 
     eval_fn = evaluate_doc if scope == 'doc' else evaluate_snt
-    eval_fn(*args, **kwargs)
+    return eval_fn(*args, **kwargs)

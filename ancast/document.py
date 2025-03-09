@@ -112,6 +112,10 @@ class SentenceMatch:
 
         self.var_n = 0
 
+        ### number of text data
+        self.num_snts = 0
+        self.num_toks = 0
+
         # final score
         self.sent_fscore = -1
 
@@ -233,7 +237,9 @@ class DocumentMatch(SentenceMatch):
         self.doc_annotations_test = {"temporal":  {}, "modal": {}, "coref": {}}
         self.doc_annotations_gold = {"temporal":  {}, "modal": {}, "coref": {}}
         self.doc_var_list = {"test" : {}, "gold":{}}
-        self.doc_num_valid = -1
+
+        self.doc_num_snts = -1
+        self.doc_num_toks = -1
 
         # final scores
         self.modal_fscore = -1
@@ -288,7 +294,7 @@ class DocumentMatch(SentenceMatch):
             cf = writer = None
 
         if isinstance(file, list) or isinstance(file, tuple):
-            name = valid = 0
+            name = num_snts = num_toks = 0
 
             p,g = file
             logger.debug("Cur P: `%s` vs G: `%s`", p, g)
@@ -379,9 +385,12 @@ class DocumentMatch(SentenceMatch):
                 if output_flag:
                     self.output_to_csv(writer, M)
 
-                valid += 1
+                num_snts += 1
+                if t_sent is not None:
+                    num_toks += len(t_sent.split())
 
-            self.doc_num_valid = valid
+            self.doc_num_snts = num_snts
+            self.doc_num_toks = num_toks
 
         logger.debug("Current Eval File: `%s`", file)
 
