@@ -3,116 +3,74 @@
 
 import logging
 import os
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 
+import csv
 import numpy as np
 
-from ancast import params
+from ancast import io_utils, params
 from ancast.document import DocumentMatch, SentenceMatch
 from ancast.resource_utils import load_abt_vocab, load_reify_rels
 
 logger = logging.getLogger(__name__)
 
 
-def collect_fpaths_aux(fpaths: List[str], exts=None) -> List[str]:
-    out = []
-    exts = exts or []
-    for fpath in fpaths:
-        if os.path.isfile(fpath):
-            out.append(fpath)
-        else:
-            if len(exts) == 0:
-                logger.warning(
-                    "Received a dir (`%s`) but no filename extensions, skipping..",
-                    fpath
-                )
-                continue
+def collect_fpaths_from_fdir(fpath: str, exts=None) -> List[str]:
+    """depth of 1 at most,,,"""
+    if os.path.isfile(fpath):
+        return [fpath]
 
-            fdir = fpath
-            for fname in os.listdir(fdir):
-                fpath = os.path.join(fdir, fname)
-                ext = os.path.splitext(fpath)[1][1:]
-                if os.path.isfile(fpath) and ext in exts:
-                    out.append(fpath)
+    out = []
+
+    exts = exts or []
+    exts_is_empty = len(exts) == 0
+    if exts_is_empty:
+        logger.warning("Received no filename extensions, collecting all files..")
+
+    fdir = fpath
+    for fname in sorted(os.listdir(fdir)):
+        fpath = os.path.join(fdir, fname)
+        ext = os.path.splitext(fpath)[1][1:]
+        if os.path.isfile(fpath) and (ext in exts or exts_is_empty):
+            out.append(fpath)
     return out
 
-def collect_fpaths(
-        pred_fpaths,
-        gold_fpaths,
-        output_fpath=None,
-        pred_exts=None,
-        gold_exts=None,
-) -> List[List]:
-    if isinstance(pred_fpaths, str):
-        pred_fpaths = [pred_fpaths]
-    if isinstance(gold_fpaths, str):
-        gold_fpaths = [gold_fpaths]
+# noinspection PyShadowingBuiltins
+def resolve_inputs(
+        inputs,
+        exts, delimiter="\n\n",
+        return_fnames=False
+) -> Union[List[str], Tuple[List[str], List[str]]]:
+    if isinstance(inputs, str):
+        inputs = [inputs]
 
-    # sentinel
-    assert all(os.path.exists(x) for x in pred_fpaths)
-    assert all(os.path.exists(x) for x in gold_fpaths)
+    # load strings from fpaths
+    fnames = []  # without extension
+    inputs_resolved = []
+    for input in inputs:
+        if os.path.exists(input):
+            # is a fpath, should be loaded
+            pred_input_fpaths_list = collect_fpaths_from_fdir(input, exts=exts)
 
-    # collect all pred and gold fpaths as specified
-    pred_fpath_list = collect_fpaths_aux(
-        pred_fpaths, exts=pred_exts or []
-    )
-    gold_fpath_list = collect_fpaths_aux(
-        gold_fpaths, exts=gold_exts or []
-    )
-
-    # NOTE: preserve `pred_fpaths` list
-    pg_fpaths = []
-    num_preds, num_golds = len(pred_fpath_list), len(gold_fpath_list)
-    if num_preds != num_golds:
-        logger.debug("Number of Files mismatch: p(%d) vs g(%d)", num_preds, num_golds)
-
-        # match equal filenames (without considering extension)
-
-        gold_basenames = [
-            os.path.splitext(os.path.basename(x))[0] for x in gold_fpath_list
-        ]
-
-        for pred_fpath in pred_fpath_list:
-            pred_basename = os.path.splitext(os.path.basename(pred_fpath))[0]
-
-            found = False
-            for i, gold_basename in enumerate(gold_basenames):
-                found = pred_basename == gold_basename
-                if found:
-                    pg_fpaths.append(
-                        [[pred_fpath, gold_fpath_list[i]]]
-                    )
-                    break
-
-            if not found:
-                logger.warning(
-                    "Found a pred file (`%s`) without a matching gold file, skipping..",
-                    pred_fpath
+            for pred_input_fpath in pred_input_fpaths_list:
+                inputs_resolved.append(
+                    io_utils.load_txt(pred_input_fpath, delimiter=delimiter)
                 )
-
-    else:
-        pg_fpaths = [
-            [[pf, gf]] for pf, gf in zip(pred_fpath_list, gold_fpath_list)
-        ]
-
-    # maybe add output fpath
-    has_output_fpath = output_fpath is not None
-    if has_output_fpath:
-        output_is_file = len(os.path.splitext(output_fpath)[-1]) > 1
-        if output_is_file:
-            for pg_pair in pg_fpaths:
-                pg_pair.append(output_fpath)
+                fnames.append(os.path.splitext(os.path.basename(pred_input_fpath))[0])
         else:
-            os.makedirs(output_fpath, exist_ok=True)
-            for pg_pair in pg_fpaths:
-                basename = os.path.splitext(os.path.basename(pg_pair[0][0]))[0]
-                pg_pair.append(os.path.join(output_fpath, f'{basename}.csv'))
+            # otherwise, should be a string input ready for eval
+            inputs_resolved.append([input])
+            fnames.append(None)
 
-    return pg_fpaths
+    if return_fnames:
+        return inputs_resolved, fnames
+    return inputs_resolved
 
+
+# noinspection PyPep8Naming
 def evaluate_snt(
-        pred_fpaths: Union[str, List[str]],
-        gold_fpaths: Union[str, List[str]],
+        pred_inputs: Union[str, List[str]],
+        gold_inputs: Union[str, List[str]],
         data_format: str,
         output_fpath=None,
         pred_exts=None,
@@ -126,16 +84,10 @@ def evaluate_snt(
         **unused
 ) -> List[float]:
     # sentinel
-    data_format = data_format.lower()
-    assert data_format in ['amr', 'umr']
-
-    eval_tuples = collect_fpaths(
-        pred_fpaths=pred_fpaths,
-        pred_exts=pred_exts,
-        gold_fpaths=gold_fpaths,
-        gold_exts=gold_exts,
-        output_fpath=output_fpath,
-    )
+    data_format = data_format or "umr"
+    assert data_format in ['amr', 'umr'], \
+        f"expected `amr` or `umr` data format, but received `{data_format}`"
+    delimiter = "\n\n" if data_format == "amr" else "\n\n\n"
 
     # maybe load external resources
     if allow_reify:
@@ -143,9 +95,64 @@ def evaluate_snt(
         load_abt_vocab(global_cache=True)
         load_reify_rels(global_cache=True)
 
-    sent_scores = []
-    for eval_tuple in eval_tuples:
-        DM = SentenceMatch(
+    pred_inputs_resolved, pred_fnames = resolve_inputs(
+        pred_inputs, exts=pred_exts, delimiter=delimiter, return_fnames=True
+    )
+    gold_inputs_resolved = resolve_inputs(
+        gold_inputs, exts=gold_exts, delimiter=delimiter
+    )
+    num_pred_inputs = len(pred_inputs_resolved)
+    num_gold_inputs = len(gold_inputs_resolved)
+
+    # there is no guarantee that the number of pred and gold inputs match perfectly
+    if num_pred_inputs != num_gold_inputs:
+        logger.warning(
+            "Number of pred and gold inputs do not match (%d vs %d)",
+            num_pred_inputs, num_gold_inputs
+        )
+
+    output_flag = output_fpath is not None
+
+    # just iterate through pred inputs
+    fscores = []
+    for i, (pred_input_blocks, pred_fname) in enumerate(
+            zip(pred_inputs_resolved, pred_fnames)):
+        logger.debug("Current Pred File: `%s`", pred_fname)
+
+        if i >= num_gold_inputs:
+            logger.warning(
+                "Found no matching gold input for `%s`, skipping..",
+                pred_fname
+            )
+            continue
+
+        csv_f = csv_writer = None
+        if output_flag:
+            write_title = True
+
+            output_is_dir = os.path.isdir(output_fpath)
+            if output_is_dir:
+                pred_output = os.path.join(output_fpath, f'{pred_fname}.csv')
+                csv_f = open(pred_output, 'w', newline='')
+            else:
+                pred_output = output_fpath
+                if io_utils.csv_is_empty(pred_output):
+                    write_title = False
+                csv_f = open(pred_output, 'a', newline='')
+
+            csv_writer = csv.writer(csv_f)
+            if write_title:
+                csv_writer.writerow(
+                    [
+                        "Sentence", data_format + "_test", data_format + "_gold",
+                        "Match T2G", "Match G2T",
+                        "Concept Match Precision", "Concept Match Recall", "Concept Match F Score",
+                        "Labeled Relational Match Precision", "Labeled Relational Match Recall",
+                        "LRM F-Score", "ULRM F-Score", "WLRM F-score", "Smatch Score"
+                    ]
+                )
+
+        match = SentenceMatch(
             format=data_format,
             Cneighbor=Cneighbor,
             sense_coefficient=sense_coefficient,
@@ -154,16 +161,24 @@ def evaluate_snt(
             use_alignment=use_alignment,
             use_smatch_top=use_smatch_top,
         )
-        output_csv = eval_tuple[1] if len(eval_tuple) > 1 else None
-        DM.read_document(eval_tuple[0], output_csv=output_csv)
 
-        sent_scores.append(DM.sent_fscore)
+        # compute fscores while accumulating messages for analysis
+        fscore = match.compute_scores(
+            pred_inputs=pred_input_blocks,
+            gold_inputs=gold_inputs_resolved[i]
+        )
+        fscores.append(fscore)
 
-    return sent_scores
+        if output_flag:
+            for msg in match.msgs:
+                csv_writer.writerow(msg)
+            csv_f.close()
+
+    return fscores
 
 def evaluate_doc(
-        pred_fpaths: Union[str, List[str]],
-        gold_fpaths: Union[str, List[str]],
+        pred_inputs: Union[str, List[str]],
+        gold_inputs: Union[str, List[str]],
         output_fpath=None,
         pred_exts=None,
         gold_exts=None,
@@ -176,21 +191,31 @@ def evaluate_doc(
         weighted=None,
         **unused
 ) -> Dict[str, Union[float, list[float]]]:
-    eval_tuples = collect_fpaths(
-        pred_fpaths=pred_fpaths,
-        pred_exts=pred_exts,
-        gold_fpaths=gold_fpaths,
-        gold_exts=gold_exts,
-        output_fpath=output_fpath,
-    )
-
     # maybe load external resources
     if allow_reify:
         logger.debug("Loading external resources..")
         load_abt_vocab(global_cache=True)
         load_reify_rels(global_cache=True)
 
-    aggregate_flag = len(eval_tuples) > 1
+    pred_inputs_resolved, pred_fnames = resolve_inputs(
+        pred_inputs, exts=pred_exts, delimiter="\n\n\n", return_fnames=True
+    )
+    gold_inputs_resolved = resolve_inputs(
+        gold_inputs, exts=gold_exts, delimiter="\n\n\n"
+    )
+    num_pred_inputs = len(pred_inputs_resolved)
+    num_gold_inputs = len(gold_inputs_resolved)
+
+    # there is no guarantee that the number of pred and gold inputs match perfectly
+    if num_pred_inputs != num_gold_inputs:
+        logger.warning(
+            "Number of pred and gold inputs do not match (%d vs %d)",
+            num_pred_inputs, num_gold_inputs
+        )
+
+    output_flag = output_fpath is not None
+
+    aggregate_flag = num_pred_inputs > 1
     aggregate = {
         'sent': [],
         'modal': [],
@@ -199,10 +224,45 @@ def evaluate_doc(
         'comp': []
     }
 
-    num_snts_by_docs = []
-    num_toks_by_docs = []
-    for eval_tuple in eval_tuples:
-        DM = DocumentMatch(
+    num_snts_by_docs, num_toks_by_docs = [], []
+    for i, (pred_input_blocks, pred_fname) in enumerate(
+            zip(pred_inputs_resolved, pred_fnames)):
+        logger.debug("Current Pred File: `%s`", pred_fname)
+
+        if i >= num_gold_inputs:
+            logger.warning(
+                "Found no matching gold input for `%s`, skipping..",
+                pred_fname
+            )
+            continue
+
+        csv_f = csv_writer = None
+        if output_flag:
+            write_title = True
+
+            output_is_dir = os.path.isdir(output_fpath)
+            if output_is_dir:
+                pred_output = os.path.join(output_fpath, f'{pred_fname}.csv')
+                csv_f = open(pred_output, 'w', newline='')
+            else:
+                pred_output = output_fpath
+                if io_utils.csv_is_empty(pred_output):
+                    write_title = False
+                csv_f = open(pred_output, 'a', newline='')
+
+            csv_writer = csv.writer(csv_f)
+            if write_title:
+                csv_writer.writerow(
+                    [
+                        "Sentence", "umr_test", "umr_gold",
+                        "Match T2G", "Match G2T",
+                        "Concept Match Precision", "Concept Match Recall", "Concept Match F Score",
+                        "Labeled Relational Match Precision", "Labeled Relational Match Recall",
+                        "LRM F-Score", "ULRM F-Score", "WLRM F-score", "Smatch Score"
+                    ]
+                )
+
+        match = DocumentMatch(
             Cneighbor=Cneighbor,
             sense_coefficient=sense_coefficient,
             allow_reify=allow_reify,
@@ -210,13 +270,22 @@ def evaluate_doc(
             use_alignment=use_alignment,
             use_smatch_top=use_smatch_top,
         )
-        DM.read_document(eval_tuple[0], output_csv=eval_tuple[1])
 
+        # compute fscores while accumulating messages for analysis
+        match.compute_scores(
+            pred_inputs=pred_input_blocks,
+            gold_inputs=gold_inputs_resolved[i]
+        )
         for k,v in aggregate.items():
-            v.append(getattr(DM, f'{k}_fscore'))
+            v.append(getattr(match, f'{k}_fscore'))
 
-        num_snts_by_docs.append(DM.doc_num_snts)
-        num_toks_by_docs.append(DM.doc_num_toks)
+        num_snts_by_docs.append(match.doc_num_snts)
+        num_toks_by_docs.append(match.doc_num_toks)
+
+        if output_flag:
+            for msg in match.msgs:
+                csv_writer.writerow(msg)
+            csv_f.close()
 
     if aggregate_flag:
         logger.info("=== Aggregate Statistics ===")
@@ -228,10 +297,9 @@ def evaluate_doc(
                 weights = num_snts_by_docs if weighted == 'snts' else num_toks_by_docs
 
             aggregate[k] = cur_aggr = np.average(v, weights=weights)
-
             logger.info(f"{'Weighted ' if weighted else ''}Aggregate {k.capitalize()} Score:\t{cur_aggr:.2%}")
 
-    elif len(eval_tuples) == 1:
+    else:
         for k, v in aggregate.items():
             aggregate[k] = v[0]
 

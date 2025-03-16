@@ -3,7 +3,7 @@
 samples/
 outputs/
 refs/
-demo/
+demo/.ipynb_checkpoints
 .stfolder
 .stignore
 

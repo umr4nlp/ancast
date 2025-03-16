@@ -82,6 +82,7 @@ def add_var(var_name, my_dict, other_dict, translate, match_list, n):
 
 class SentenceMatch:
 
+    # noinspection PyPep8Naming
     def __init__(
             self,
             format: str = 'umr',
@@ -119,6 +120,9 @@ class SentenceMatch:
         # final score
         self.sent_fscore = -1
 
+        # per-anno messages
+        self.msgs = []
+
     def macro_avg(self, M):
         self.smatch_scores.append(M.smatch_format_score)
         self.concept_scores.append(M.concept_match_fscore)
@@ -130,103 +134,109 @@ class SentenceMatch:
         self.semantic_metric_precision.log_and_inc_metric(M.Mt01)
         self.semantic_metric_recall.log_and_inc_metric(M.Mt10)
 
-    def output_to_csv(self, writer, M = None, title=False):
-        if title:
-            writer.writerow(["Sentence", self.format + "_test", self.format + "_gold", "Match T2G", "Match G2T", "Concept Match Precision", "Concept Match Recall", "Concept Match F Score", "Labeled Relational Match Precision", "Labeled Relational Match Recall", "LRM F-Score", "ULRM F-Score", "WLRM F-score", "Smatch Score"])
-        else:
-            formatted_str_match01 = '\n'.join(f"{Match.gname(M.umr0, key)}: {Match.gname(M.umr1, value)} \t Q-level = {M.quality_list01[key]}" for key, value in M.match_list01.items()) + "\n\nGood quality percentage:\t{:.2%}".format(M.gp01)
+    # def output_to_csv(self, writer, M = None, title=False):
+    def summarize(self, match_res):
+        formatted_str_match01 = '\n'.join(f"{Match.gname(match_res.umr0, key)}: {Match.gname(match_res.umr1, value)} \t Q-level = {match_res.quality_list01[key]}" for key, value in match_res.match_list01.items()) + "\n\nGood quality percentage:\t{:.2%}".format(match_res.gp01)
+        formatted_str_match10 = '\n'.join(f"{Match.gname(match_res.umr1, key)}: {Match.gname(match_res.umr0, value)} \t Q-level = {match_res.quality_list10[key]}" for key, value in match_res.match_list10.items()) + "\n\nGood quality percentage:\t" + "{:.2%}".format(match_res.gp10)
+        self.msgs.append(
+            [
+                match_res.umr0.text,
+                match_res.umr0.generate_umr_text(),
+                match_res.umr1.generate_umr_text(),
+                formatted_str_match01,
+                formatted_str_match10,
+                "{:.2%}".format(match_res.match_score01),
+                "{:.2%}".format(match_res.match_score10),
+                "{:.2%}".format(match_res.concept_match_fscore),
+                "{:.2%}".format(match_res.lbd_p),
+                "{:.2%}".format(match_res.lbd_r),
+                "{:.2%}".format(match_res.lbd_fscore),
+                "{:.2%}".format(match_res.ulbd_fscore),
+                "{:.2%}".format(match_res.wlbd_fscore),
+                "{:.2%}".format(match_res.smatch_format_score)
+            ]
+        )
 
-            formatted_str_match10 = '\n'.join(f"{Match.gname(M.umr1, key)}: {Match.gname(M.umr0, value)} \t Q-level = {M.quality_list10[key]}" for key, value in M.match_list10.items()) + "\n\nGood quality percentage:\t"+"{:.2%}".format(M.gp10)
+    def compute_scores(self, pred_inputs, gold_inputs):
+        name, bgi = 0, -1
+        for pred_input in pred_inputs:
+            bgi += 1
+            if "#" not in pred_input:
+                logger.warning(f"Encountered unknown block in %s, skipping", bgi)
+                continue
 
-            writer.writerow([M.umr0.text, M.umr0.generate_umr_text(), M.umr1.generate_umr_text(), formatted_str_match01, formatted_str_match10, "{:.2%}".format(M.match_score01), "{:.2%}".format(M.match_score10), "{:.2%}".format(M.concept_match_fscore), "{:.2%}".format(M.lbd_p), "{:.2%}".format(M.lbd_r), "{:.2%}".format(M.lbd_fscore), "{:.2%}".format(M.ulbd_fscore), "{:.2%}".format(M.wlbd_fscore), "{:.2%}".format(M.smatch_format_score)])
+            pred_input_match = re.search(self.snt_pat, pred_input)
+            if pred_input_match:  # the block is crucial
+                while not re.search(self.snt_pat, gold_inputs[bgi]):
+                    bgi += 1
+                gold_input = gold_inputs[bgi]
+                gold_input_match = re.search(self.snt_pat, gold_input)
 
-    def read_document(self, file, output_csv=None):
-        output_flag = output_csv is not None
-        if output_flag:
-            cf =  open(output_csv, 'w', newline='')
-            writer = csv.writer(cf)
-            self.output_to_csv(writer, title=True)
-        else:
-            cf = writer = None
+                name += 1
+                snt_test = pred_input.split(pred_input_match.group())[1].split("\n")[0].strip()
+                snt_gold = gold_input.split(gold_input_match.group())[1].split("\n")[0].strip()
+                # if snt_test != snt_gold:
+                #     logger.info(f"{name} sentence is not the same!")
 
-        if isinstance(file, list) or isinstance(file, tuple):
-            # assert self.format == "amr"
-            l_test = open(file[0], "r").read()
-            l_gold = open(file[1], "r").read()
+                if self.format_is_amr:
+                    amr_test = "\n".join(pred_input.split("#")[-1].split("\n")[1:])
+                    amr_gold = "\n".join(gold_input.split("#")[-1].split("\n")[1:])
+                else:
+                    amr_test = "\n".join(pred_input.split("\n\n")[1].split("\n")[1:])
+                    amr_gold = "\n".join(gold_input.split("\n\n")[1].split("\n")[1:])
+                ta, ga = {}, {}
 
-            blocks_test = l_test.strip().split("\n\n")
-            blocks_gold = l_gold.strip().split("\n\n")
+                tamr = Sentence(
+                    sent=snt_test,
+                    semantic_text=amr_test,
+                    alignment=ta,
+                    sent_num=name,
+                    format=self.format
+                )
+                gamr = Sentence(
+                    sent=snt_gold,
+                    semantic_text=amr_gold,
+                    alignment=ga,
+                    sent_num=name,
+                    format=self.format
+                )
 
-            name = 0
-            bgi = -1
-
-            for bt in blocks_test:
-                bgi += 1
-                if "#" not in bt:
-                    logger.info(f"Encountered unknown block in %s, skipping", bgi)
+                if tamr.invalid or gamr.invalid:
+                    logger.warning(f"Error encountered, skipping sentence {name}")
                     continue
-                bt_match = re.search(r"::snt\s", bt)
-                if bt_match:  # the block is crucial
-                    while not re.search(r"::snt\s", blocks_gold[bgi]):
-                        bgi += 1
-                    bg = blocks_gold[bgi]
-                    bg_match = re.search(r"::snt\s", bg)
-                    name += 1
-                    snt_test = bt.split(bt_match.group())[1].split("\n")[0].strip()
-                    snt_gold = bg.split(bg_match.group())[1].split("\n")[0].strip()
-                    # if snt_test != snt_gold:
-                    #     logger.info(f"{name} sentence is not the same!")
 
-                    amr_test = "\n".join(bt.split("#")[-1].split("\n")[1:])
-                    amr_gold = "\n".join(bg.split("#")[-1].split("\n")[1:])
-                    ta = {}
-                    ga = {}
+                match_res = MatchResolution(
+                    tamr,
+                    gamr,
+                    Cneighbor=self.Cneighbor,
+                    sense_coefficient=self.sense_coefficient,
+                    separate_1_and_2=self.separate_1_and_2,
+                    use_alignment=self.use_alignment,
+                    use_smatch_top=self.use_smatch_top,
+                )
 
-                    tamr = Sentence(
-                        sent=snt_test,
-                        semantic_text=amr_test,
-                        alignment=ta,
-                        sent_num=name,
-                        format=self.format
-                    )
-                    gamr = Sentence(
-                        sent=snt_gold,
-                        semantic_text=amr_gold,
-                        alignment=ga,
-                        sent_num=name,
-                        format=self.format
-                    )
+                self.macro_avg(match_res)
+                self.add_doct_info(match_res)  # micro-average
 
-                    if tamr.invalid or gamr.invalid:
-                        logger.info(f"Error encountered, skipping sentence {name}")
-                        continue
+                # cache msgs for analysis
+                self.summarize(match_res)
 
-                    M = MatchResolution(
-                        tamr,
-                        gamr,
-                        Cneighbor=self.Cneighbor,
-                        sense_coefficient=self.sense_coefficient,
-                        separate_1_and_2=self.separate_1_and_2,
-                        use_alignment=self.use_alignment,
-                        use_smatch_top=self.use_smatch_top,
-                    )
-
-                    self.macro_avg(M)
-                    self.add_doct_info(M)  # micro-average
-
-                    if output_flag:
-                        self.output_to_csv(writer, M)
-
-
-        logger.debug("Current Eval File: `%s`", file)
-
+        # aggregate
         ps, rs = self.semantic_metric_precision.compute("lr"), self.semantic_metric_recall.compute("lr")
         self.sent_fscore = protected_divide(2*ps*rs, ps+rs)
-        logger.info(f"Sent Micro:\tPrecision: {ps:.2%}\tRecall: {rs:.2%}\tFscore: {self.sent_fscore:.2%}")
+        logger.info(
+            f"Sent Micro:\tPrecision: {ps:.2%}\tRecall: {rs:.2%}\tFscore: {self.sent_fscore:.2%}"
+        )
 
-        # --------------------------------------
-        if cf is not None:
-            cf.close()
+        return self.sent_fscore
+
+    @property
+    def format_is_amr(self):
+        return  self.format == "amr"
+
+    @property
+    def snt_pat(self):
+        return  r"::snt\s" if self.format_is_amr else r"::\ssnt\d+"
 
 
 class DocumentMatch(SentenceMatch):
@@ -246,6 +256,9 @@ class DocumentMatch(SentenceMatch):
         self.temporal_fscore = -1
         self.coref_fscore = -1
         self.comp_fscore = -1
+
+        # per-anno messages
+        self.msgs = []
 
     def add_doct_info(self, M, **kwargs):
         super().add_doct_info(M, **kwargs)
@@ -284,139 +297,117 @@ class DocumentMatch(SentenceMatch):
                         self.var_n = add_var(tail, self.doc_var_list["gold"], self.doc_var_list["test"], M.translate_match, M.match_list10, self.var_n)
                         self.doc_annotations_gold[key][(self.doc_var_list["gold"][head], self.doc_var_list["gold"][tail])] = rel[1:]
 
-    def read_document(self, file, output_csv=None):
-        output_flag = output_csv is not None
-        if output_flag:
-            cf =  open(output_csv, 'w', newline='')
-            writer = csv.writer(cf)
-            self.output_to_csv(writer, title=True)
-        else:
-            cf = writer = None
+    def compute_scores(self, pred_inputs, gold_inputs):
+        name = num_snts = num_toks = 0
 
-        if isinstance(file, list) or isinstance(file, tuple):
-            name = num_snts = num_toks = 0
+        # ignoring file head
+        for pred_input, gold_input in zip(pred_inputs, gold_inputs):
+            name += 1
+            logger.debug("Sentence %d"%name)
 
-            p,g = file
-            logger.debug("Cur P: `%s` vs G: `%s`", p, g)
-            l_test = open(p, "r").read()
-            l_gold = open(g, "r").read()
+            try:
+                assert "sentence" in pred_input and "sentence" in gold_input, \
+                    f"Keyword `sentence` is not found in block {name}"
+            except AssertionError as error:
+                logger.info(f"Format Error: {error.args[0]}")
+                raise
+            try:
+                assert "document" in pred_input and "document" in gold_input, \
+                    f"Keyword `document` is not found in block {name}"
+            except AssertionError as error:
+                logger.info(f"Format Error: {error.args[0]}")
+                raise
 
-            blocks_test = l_test.strip().split("# :: snt")[1:]
-            blocks_gold = l_gold.strip().split("# :: snt")[1:]
+            t_buff = pred_input.split("# sentence level graph:")
+            g_buff = gold_input.split("# sentence level graph:")
 
-            # ignoring file head
+            t_sent = re.sub(r'^\d+[\s\t]*', '', t_buff[0]).strip()
+            g_sent = re.sub(r'^\d+[\s\t]*', '', g_buff[0]).strip()
 
-            for bt, bg in zip(blocks_test, blocks_gold):
+            t_buff = t_buff[1].strip().split("# alignment:")
+            g_buff = g_buff[1].strip().split("# alignment:")
 
-                name += 1
-                logger.debug("Sentence %d"%name)
+            t_graph = t_buff[0].strip()
+            g_graph = g_buff[0].strip()
 
-                try:
-                    assert ("sentence" in bt) and ("sentence" in bg), f"Keyword `sentence` is not found in block {name}"
-                except AssertionError as error:
-                    logger.info(f"Format Error: {error.args[0]}")
-                    raise
-                try:
-                    assert ("document" in bt) and ("document" in bg), f"Keyword `document` is not found in block {name}"
-                except AssertionError as error:
-                    logger.info(f"Format Error: {error.args[0]}")
-                    raise
+            t_buff = t_buff[1].strip().split("# document level annotation:")
+            g_buff = g_buff[1].strip().split("# document level annotation:")
 
-                t_buff = bt.split("# sentence level graph:")
-                g_buff = bg.split("# sentence level graph:")
+            t_alignment = t_buff[0].strip()
+            g_alignment = g_buff[0].strip()
 
-                t_sent = re.sub(r'^\d+[\s\t]*', '', t_buff[0]).strip()
-                g_sent = re.sub(r'^\d+[\s\t]*', '', g_buff[0]).strip()
+            t_doclevel = t_buff[1].strip()
+            g_doclevel = g_buff[1].strip()
 
-                t_buff = t_buff[1].strip().split("# alignment:")
-                g_buff = g_buff[1].strip().split("# alignment:")
+            t_alignment = parse_alignment(t_alignment)
+            g_alignment = parse_alignment(g_alignment)
 
-                t_graph = t_buff[0].strip()
-                g_graph = g_buff[0].strip()
+            if t_sent != g_sent:
+                logger.info(f"Warning: Sentence {name} sentence content mismatched! Using test sentence.")
+                g_sent = t_sent
 
-                t_buff = t_buff[1].strip().split("# document level annotation:")
-                g_buff = g_buff[1].strip().split("# document level annotation:")
+            tumr = Sentence(
+                sent = t_sent,
+                semantic_text = t_graph,
+                alignment= t_alignment,
+                sent_num = name,
+                format = self.format
+            )
+            gumr = Sentence(
+                sent = g_sent,
+                semantic_text = g_graph,
+                alignment= g_alignment,
+                sent_num = name,
+                format = self.format
+            )
 
-                t_alignment = t_buff[0].strip()
-                g_alignment = g_buff[0].strip()
+            if tumr.invalid or gumr.invalid:
+                logger.info(f"Error encountered, skipping sentence {name}")
+                continue
 
-                t_doclevel = t_buff[1].strip()
-                g_doclevel = g_buff[1].strip()
+            match_res = MatchResolution(
+                tumr,
+                gumr,
+                Cneighbor=self.Cneighbor,
+                sense_coefficient=self.sense_coefficient,
+                separate_1_and_2=self.separate_1_and_2,
+                use_alignment=self.use_alignment,
+                use_smatch_top=self.use_smatch_top,
+            )
 
-                t_alignment = parse_alignment(t_alignment)
-                g_alignment = parse_alignment(g_alignment)
+            self.add_doct_info(match_res, test_doc = t_doclevel, gold_doc = g_doclevel)
+            self.macro_avg(match_res)
 
-                if t_sent != g_sent:
-                    logger.info(f"Warning: Sentence {name} sentence content mismatched! Using test sentence.")
-                    g_sent = t_sent
+            self.summarize(match_res)
 
-                tumr = Sentence(
-                    sent = t_sent,
-                    semantic_text = t_graph,
-                    alignment= t_alignment,
-                    sent_num = name,
-                    format = self.format
-                )
-                gumr = Sentence(
-                    sent = g_sent,
-                    semantic_text = g_graph,
-                    alignment= g_alignment,
-                    sent_num = name,
-                    format = self.format
-                )
+            num_snts += 1
+            if t_sent is not None:
+                num_toks += len(t_sent.split())
 
-                if tumr.invalid or gumr.invalid:
-                    logger.info(f"Error encountered, skipping sentence {name}")
-                    continue
-
-                M = MatchResolution(
-                    tumr,
-                    gumr,
-                    Cneighbor=self.Cneighbor,
-                    sense_coefficient=self.sense_coefficient,
-                    separate_1_and_2=self.separate_1_and_2,
-                    use_alignment=self.use_alignment,
-                    use_smatch_top=self.use_smatch_top,
-                )
-
-                self.add_doct_info(M, test_doc = t_doclevel, gold_doc = g_doclevel)
-                self.macro_avg(M)
-
-                if output_flag:
-                    self.output_to_csv(writer, M)
-
-                num_snts += 1
-                if t_sent is not None:
-                    num_toks += len(t_sent.split())
-
-            self.doc_num_snts = num_snts
-            self.doc_num_toks = num_toks
-
-        logger.debug("Current Eval File: `%s`", file)
+        self.doc_num_snts = num_snts
+        self.doc_num_toks = num_toks
 
         ps, rs = self.semantic_metric_precision.compute("lr"), self.semantic_metric_recall.compute("lr")
         self.sent_fscore = protected_divide(2*ps*rs, ps+rs)
         logger.info(f"Sent Micro:\tPrecision: {ps:.2%}\tRecall: {rs:.2%}\tFscore: {self.sent_fscore:.2%}")
 
-        if self.is_umr_format:
-            pm, rm, self.modal_fscore = self.calculate_modal()
-            pt, rt, self.temporal_fscore = self.calculate_TCTC("temporal", get_edge_list_temp)
-            pc, rc, self.coref_fscore = self.calculate_TCTC("coref", get_edge_list_coref)
+        pm, rm, self.modal_fscore = self.calculate_modal()
+        pt, rt, self.temporal_fscore = self.calculate_TCTC("temporal", get_edge_list_temp)
+        pc, rc, self.coref_fscore = self.calculate_TCTC("coref", get_edge_list_coref)
 
-            logger.info(f"Modality:\tPrecision: {pm:.2%}\tRecall: {rm:.2%}\tFscore: {self.modal_fscore:.2%}")
-            logger.info(f"Temporal:\tPrecision: {pt:.2%}\tRecall: {rt:.2%}\tFscore: {self.temporal_fscore:.2%}")
-            logger.info(f"Coref:\t\tPrecision: {pc:.2%}\tRecall: {rc:.2%}\tFscore: {self.coref_fscore:.2%}")
+        logger.info(f"Modality:\tPrecision: {pm:.2%}\tRecall: {rm:.2%}\tFscore: {self.modal_fscore:.2%}")
+        logger.info(f"Temporal:\tPrecision: {pt:.2%}\tRecall: {rt:.2%}\tFscore: {self.temporal_fscore:.2%}")
+        logger.info(f"Coref:\t\tPrecision: {pc:.2%}\tRecall: {rc:.2%}\tFscore: {self.coref_fscore:.2%}")
 
-            comp_p = self.semantic_metric_precision.compute("document")
-            comp_r = self.semantic_metric_recall.compute("document")
+        comp_p = self.semantic_metric_precision.compute("document")
+        comp_r = self.semantic_metric_recall.compute("document")
 
-            self.comp_fscore = protected_divide(2*comp_p*comp_r, comp_p+comp_r)
+        self.comp_fscore = protected_divide(2*comp_p*comp_r, comp_p+comp_r)
 
-            logger.info(f"Comprehensive Score:\t{self.comp_fscore:.2%}\n")
+        logger.info(f"Comprehensive Score:\t{self.comp_fscore:.2%}\n")
 
-        # --------------------------------------
-        if cf is not None:
-            cf.close()
+        return self.sent_fscore, self.modal_fscore, self.temporal_fscore, self.coref_fscore, self.comp_fscore
+
 
     def warn_error(self, theset, test_or_gold, temp_or_coref):
         if theset:
@@ -434,8 +425,7 @@ class DocumentMatch(SentenceMatch):
             logger.info(pstr)
 
     def calculate_modal(self):
-        set0 = set()
-        set1 = set()
+        set0, set1 = set(), set()
         for key, value in self.doc_annotations_test["modal"].items():
             set0.add(str(key)+str(value))
         for key,value in self.doc_annotations_gold["modal"].items():
@@ -465,7 +455,6 @@ class DocumentMatch(SentenceMatch):
         el_gold =  get_f(self.doc_annotations_gold[keyword])
 
         # two steps above are pure translation
-
         cluster_el_test, test_whole_set, inconsistent_test, circular_test, wrongcorefs_test = get_cluster(el_test)
         cluster_el_gold, gold_whole_set, inconsistent_gold, circular_gold, wrongcorefs_gold = get_cluster(el_gold)
 
@@ -497,7 +486,3 @@ class DocumentMatch(SentenceMatch):
         s1 = protected_divide(s1, cnt_gold)
 
         return s0, s1, protected_divide(2*s0*s1 , (s0+s1))
-
-    @property
-    def is_umr_format(self):
-        return  self.format == 'umr'
