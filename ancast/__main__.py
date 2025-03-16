@@ -117,8 +117,8 @@ def main():
 
     ### inner
     return evaluate(
-        pred_fpaths=args.pred,
-        gold_fpaths=args.gold,
+        pred_inputs=args.pred,
+        gold_inputs=args.gold,
         output_fpath=args.output,
         pred_exts=args.pred_ext,
         gold_exts=args.gold_ext,

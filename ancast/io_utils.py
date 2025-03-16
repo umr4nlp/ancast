@@ -48,3 +48,12 @@ def save_json(obj, fpath_or_dir, fname=None, indent=4):
   with open(fpath, 'w') as f:
     json.dump(obj, f, indent=indent)
   return fpath
+
+# csv
+def csv_is_empty(fpath):
+  if os.path.exists(fpath) and os.path.getsize(fpath) > 0:
+    with open(fpath, 'r', encoding='utf-8') as f:
+      first_line = f.readline()
+      return first_line.strip() == ''
+  return True
+
