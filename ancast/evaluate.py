@@ -81,6 +81,7 @@ def evaluate_snt(
         allow_reify: bool = params.ALLOW_REIFY,
         use_alignment: bool = params.USE_ALIGNMENT,
         use_smatch_top: bool = params.USE_SMATCH_TOP,
+        output_csv_as_string=False,
         **unused
 ) -> List[float]:
     # sentinel
@@ -173,8 +174,11 @@ def evaluate_snt(
             for msg in match.msgs:
                 csv_writer.writerow(msg)
             csv_f.close()
-
-    return fscores
+    
+    if output_csv_as_string:
+        return fscores, match.msgs
+    else:
+        return fscores
 
 def evaluate_doc(
         pred_inputs: Union[str, List[str]],
@@ -189,6 +193,7 @@ def evaluate_doc(
         use_alignment: bool = params.USE_ALIGNMENT,
         use_smatch_top: bool = params.USE_SMATCH_TOP,
         weighted=None,
+        output_csv_as_string=False,
         **unused
 ) -> Dict[str, Union[float, list[float]]]:
     # maybe load external resources
@@ -302,8 +307,10 @@ def evaluate_doc(
     else:
         for k, v in aggregate.items():
             aggregate[k] = v[0]
-
-    return aggregate
+    if output_csv_as_string:
+        return aggregate, match.msgs
+    else:
+        return aggregate
 
 # @timer_decorator
 def evaluate(*args, scope: str = "doc", **kwargs):
