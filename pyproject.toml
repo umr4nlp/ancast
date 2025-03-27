@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ancast"
-version = '0.1.0'
+version = '0.1.1'
 authors = [
   { name="Haibo Sun", email="hsun@brandeis.edu" },
   { name="Jayeol Chun", email="jchun@brandeis.edu" },
