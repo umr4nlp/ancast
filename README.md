@@ -77,8 +77,8 @@ You can pass AMR/UMR files as strings and acquire fscores and detailed compariso
 ```python
 from ancast import evaluate
 
-pred_fpath = open("./samples/umr_test.txt", "r").read() # alternatively you can directly pass generated umrs/amrs packed in standard format
-gold_fpath = open("./samples/umr_gold.txt", "r").read()
+pred_strings = open("./samples/umr_test.txt", "r").read() # alternatively you can directly pass generated umrs/amrs packed in standard format
+gold_strings = open("./samples/umr_gold.txt", "r").read()
 # out_fpath = "./samples/outputs"
 
 out = evaluate(
