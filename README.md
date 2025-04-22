@@ -62,12 +62,12 @@ from ancast import evaluate
 
 pred_fpath = "./samples/umr_test.txt"
 gold_fpath = "./samples/umr_gold.txt"
-out_fpath = "./samples/outputs"
+output_fpath = "./samples/outputs"
 
 out = evaluate(
     pred_fpath,
     gold_fpath, 
-    out_fpath, 
+    output_fpath, 
     scope="doc"
 )
 ```
@@ -79,12 +79,12 @@ from ancast import evaluate
 
 pred_strings = open("./samples/umr_test.txt", "r").read() # alternatively you can directly pass generated umrs/amrs packed in standard format
 gold_strings = open("./samples/umr_gold.txt", "r").read()
-# out_fpath = "./samples/outputs"
+# output_fpath = "./samples/outputs"
 
 out, msg = evaluate(
     pred_strings,
     gold_strings, 
-    # out_fpath, 
+    # output_fpath, 
     scope="doc",
     output_csv_as_string=True
 )
