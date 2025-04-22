@@ -73,7 +73,7 @@ out = evaluate(
 ```
 
 ### Python API with Strings
-You can pass AMR/UMR files as strings and acquire fscores and detailed comparison directly through `evaluate`
+You can pass AMR/UMR files as strings and acquire fscores and detailed comparison directly through `evaluate` and get csv as strings as well
 ```python
 from ancast import evaluate
 
@@ -81,7 +81,7 @@ pred_strings = open("./samples/umr_test.txt", "r").read() # alternatively you ca
 gold_strings = open("./samples/umr_gold.txt", "r").read()
 # out_fpath = "./samples/outputs"
 
-out = evaluate(
+out, msg = evaluate(
     pred_strings,
     gold_strings, 
     # out_fpath, 
